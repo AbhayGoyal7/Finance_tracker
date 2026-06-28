@@ -1,6 +1,7 @@
 import os
 import threading
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -10,23 +11,21 @@ import db
 
 load_dotenv()
 
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
-
 
 def run_bot():
-    from telegram import Update
-    from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-    from parser import parse
-    from datetime import datetime
     import bot as bot_module
     asyncio.run(bot_module.start())
 
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app):
     t = threading.Thread(target=run_bot, daemon=True)
     t.start()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+templates = Jinja2Templates(directory="templates")
 
 
 @app.get("/")
