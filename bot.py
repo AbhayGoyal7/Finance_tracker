@@ -1,4 +1,5 @@
 import os
+import asyncio
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
@@ -88,13 +89,11 @@ async def cmd_total(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     totals = db.user_month_total(chat_id, month)
     cats = db.user_month_cats(chat_id, month)
     total_exp = totals["expense"]
-
     cat_lines = ""
     for c in cats:
         pct = int((c["total"] / total_exp * 100)) if total_exp > 0 else 0
         b = bar(c["total"], total_exp)
         cat_lines += f"  {c['category']:<12} {fmt(c['total'])}  {b} {pct}%\n"
-
     text = (
         f"📊 *{month} Summary*\n\n"
         f"{'─'*28}\n"
@@ -212,22 +211,42 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
+def build_app():
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("help", cmd_help))
+    application.add_handler(CommandHandler("total", cmd_total))
+    application.add_handler(CommandHandler("history", cmd_history))
+    application.add_handler(CommandHandler("undo", cmd_undo))
+    application.add_handler(CommandHandler("dashboard", cmd_dashboard))
+    application.add_handler(CommandHandler("month", cmd_month))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    return application
+
+
 async def start():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("total", cmd_total))
-    app.add_handler(CommandHandler("history", cmd_history))
-    app.add_handler(CommandHandler("undo", cmd_undo))
-    app.add_handler(CommandHandler("dashboard", cmd_dashboard))
-    app.add_handler(CommandHandler("month", cmd_month))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    print("Bot starting...")
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("help", cmd_help))
+    application.add_handler(CommandHandler("total", cmd_total))
+    application.add_handler(CommandHandler("history", cmd_history))
+    application.add_handler(CommandHandler("undo", cmd_undo))
+    application.add_handler(CommandHandler("dashboard", cmd_dashboard))
+    application.add_handler(CommandHandler("month", cmd_month))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+    )
     print("Bot running...")
-    await app.run_polling(allowed_updates=Update.ALL_TYPES)
+    while True:
+        await asyncio.sleep(3600)
 
 
 def main():
-    import asyncio
     asyncio.run(start())
 
 
