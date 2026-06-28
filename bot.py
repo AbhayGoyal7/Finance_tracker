@@ -212,7 +212,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode="Markdown")
 
 
-def main():
+async def start():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
@@ -223,8 +223,12 @@ def main():
     app.add_handler(CommandHandler("month", cmd_month))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("Bot running...")
+    await app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+def main():
     import asyncio
-    asyncio.run(app.run_polling(allowed_updates=Update.ALL_TYPES))
+    asyncio.run(start())
 
 
 if __name__ == "__main__":
