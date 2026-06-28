@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Expense Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font-family:'Courier New',Courier,monospace;font-size:14px}
+h1{color:#00ff88;font-size:1.3rem;letter-spacing:2px}
+h2{color:#00ff88;font-size:0.95rem;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;border-bottom:1px solid #21262d;padding-bottom:6px}
+.header{background:#161b22;border-bottom:1px solid #21262d;padding:16px 24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+select{background:#21262d;color:#e6edf3;border:1px solid #30363d;padding:6px 12px;font-family:inherit;font-size:0.9rem;border-radius:4px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px;max-width:1400px;margin:0 auto}
+.panel{background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px}
+.panel.full{grid-column:1/-1}
+.green{color:#00ff88}.red{color:#ff4d4d}.grey{color:#8b949e}
+table{width:100%;border-collapse:collapse}
+th{color:#8b949e;font-weight:normal;text-align:left;padding:6px 8px;border-bottom:1px solid #21262d;font-size:0.8rem;text-transform:uppercase}
+td{padding:6px 8px;border-bottom:1px solid #1c2128;font-size:0.85rem}
+tr:hover td{background:#1c2128}
+.big-num{font-size:2rem;color:#00ff88;font-weight:bold}
+.sub{color:#8b949e;font-size:0.8rem}
+.loading{text-align:center;padding:40px;color:#8b949e}
+@media(max-width:768px){.grid{grid-template-columns:1fr}.panel.full{grid-column:1}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>⬡ Expense Tracker</h1>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span style="color:#8b949e">Month:</span>
+    <select id="monthSel"></select>
+  </div>
+  <span id="userName" style="color:#8b949e"></span>
+</div>
+
+<div class="grid">
+  <div class="panel" id="p-overview"><div class="loading">Loading...</div></div>
+  <div class="panel" id="p-cats"><div class="loading">Loading...</div></div>
+  <div class="panel full" id="p-daily"><div class="loading">Loading...</div></div>
+  <div class="panel full" id="p-mom"><div class="loading">Loading...</div></div>
+  <div class="panel full" id="p-recent"><div class="loading">Loading...</div></div>
+  <div class="panel full" id="p-insights"><div class="loading">Loading...</div></div>
+</div>
+
+<script>
+const TOKEN = "{{ token }}";
+const CAT_COLORS = {
+  food:'#ff6b6b',travel:'#4ecdc4',groceries:'#45b7d1',clothes:'#f9ca24',
+  rent:'#6c5ce7',bills:'#fd79a8',luxuries:'#e17055',investments:'#00b894',
+  health:'#0984e3',education:'#a29bfe',income:'#00ff88',other:'#636e72'
+};
+
+function fmt(n){
+  n=Math.round(Number(n));
+  if(isNaN(n))return'₹0';
+  return'₹'+n.toLocaleString('en-IN');
+}
+function catColor(c){return CAT_COLORS[c]||'#636e72'}
+function daysInMonth(y,m){return new Date(y,m,0).getDate()}
+
+let ALL_ROWS=[];
+
+async function loadData(){
+  const res = await fetch(`/api/data/${TOKEN}`);
+  const data = await res.json();
+  ALL_ROWS = data.rows || [];
+  document.getElementById('userName').textContent = data.name ? `👤 ${data.name}` : '';
+  setupMonths();
+  render();
+}
+
+function setupMonths(){
+  const months=[...new Set(ALL_ROWS.map(r=>r.date.slice(0,7)))].sort().reverse();
+  const now=new Date();
+  const curr=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  if(!months.includes(curr))months.unshift(curr);
+  const sel=document.getElementById('monthSel');
+  sel.innerHTML='';
+  months.forEach(m=>{
+    const o=document.createElement('option');
+    o.value=m;o.textContent=m;
+    if(m===curr)o.selected=true;
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change',render);
+}
+
+function getMonth(){return document.getElementById('monthSel').value}
+
+function rowsForMonth(m){return ALL_ROWS.filter(r=>r.date.startsWith(m))}
+function expenses(rows){return rows.filter(r=>r.type==='expense')}
+function incomes(rows){return rows.filter(r=>r.type==='income')}
+function sum(rows){return rows.reduce((a,r)=>a+r.amount,0)}
+function catTotals(rows){
+  const m={};
+  rows.forEach(r=>{m[r.category]=(m[r.category]||0)+r.amount});
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+}
+
+function render(){
+  const month=getMonth();
+  const [yr,mo]=month.split('-').map(Number);
+  const mRows=rowsForMonth(month);
+  const mExp=expenses(mRows);
+  const mInc=incomes(mRows);
+  const totalExp=sum(mExp);
+  const totalInc=sum(mInc);
+  const cats=catTotals(mExp);
+
+  renderOverview(month,yr,mo,totalExp,totalInc);
+  renderCats(cats,totalExp);
+  renderDaily(month,yr,mo,mExp);
+  renderMoM(month);
+  renderRecent(mRows);
+  renderInsights(month,mRows,mExp,totalExp,cats);
+}
+
+function renderOverview(month,yr,mo,totalExp,totalInc){
+  const el=document.getElementById('p-overview');
+  const today=new Date();
+  const isCurr=(yr===today.getFullYear()&&mo===(today.getMonth()+1));
+  const dTotal=daysInMonth(yr,mo);
+  const dElapsed=isCurr?today.getDate():dTotal;
+  const pace=dElapsed>0?(totalExp/dElapsed)*dTotal:0;
+  el.innerHTML=`<h2>📈 Overview — ${month}</h2>
+<div style="margin-bottom:16px">
+  <div class="sub">Total Spent</div>
+  <div class="big-num">${fmt(totalExp)}</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+  <div style="display:flex;justify-content:space-between"><span class="grey">Income</span><span class="green">${fmt(totalInc)}</span></div>
+  <div style="display:flex;justify-content:space-between"><span class="grey">Net</span><span class="${totalInc-totalExp>=0?'green':'red'}">${fmt(totalInc-totalExp)}</span></div>
+  <div style="display:flex;justify-content:space-between"><span class="grey">Days elapsed</span><span>${dElapsed} / ${dTotal}</span></div>
+  ${isCurr?`<div style="display:flex;justify-content:space-between"><span class="grey">Month-end pace</span><span class="${pace>totalExp?'red':'green'}">${fmt(pace)}</span></div>`:''}
+</div>`;
+}
+
+function renderCats(cats,totalExp){
+  const el=document.getElementById('p-cats');
+  if(!cats.length){el.innerHTML='<h2>🥧 Categories</h2><p class="grey">No data</p>';return}
+  const cx=100,cy=100,R=80,r=48;
+  let paths='',angle=0;
+  cats.slice(0,12).forEach(([cat,amt])=>{
+    const slice=(amt/totalExp)*Math.PI*2;
+    const x1=cx+R*Math.sin(angle),y1=cy-R*Math.cos(angle);
+    angle+=slice;
+    const x2=cx+R*Math.sin(angle),y2=cy-R*Math.cos(angle);
+    const xi1=cx+r*Math.sin(angle-slice),yi1=cy-r*Math.cos(angle-slice);
+    const xi2=cx+r*Math.sin(angle),yi2=cy-r*Math.cos(angle);
+    const large=slice>Math.PI?1:0;
+    paths+=`<path d="M${x1},${y1} A${R},${R} 0 ${large},1 ${x2},${y2} L${xi2},${yi2} A${r},${r} 0 ${large},0 ${xi1},${yi1} Z" fill="${catColor(cat)}" stroke="#0d1117" stroke-width="1.5"/>`;
+  });
+  let rows='';
+  cats.forEach(([cat,amt])=>{
+    const pct=totalExp>0?Math.round(amt/totalExp*100):0;
+    rows+=`<tr><td><span style="color:${catColor(cat)}">■</span> ${cat}</td><td>${fmt(amt)}</td><td class="grey">${pct}%</td></tr>`;
+  });
+  el.innerHTML=`<h2>🥧 Categories</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+<svg viewBox="0 0 200 200" width="160" height="160" xmlns="http://www.w3.org/2000/svg">
+  ${paths}
+  <text x="${cx}" y="${cy-6}" text-anchor="middle" fill="#8b949e" font-size="10" font-family="monospace">total</text>
+  <text x="${cx}" y="${cy+12}" text-anchor="middle" fill="#00ff88" font-size="13" font-family="monospace" font-weight="bold">${fmt(totalExp)}</text>
+</svg>
+<div style="flex:1;min-width:180px"><table><thead><tr><th>Category</th><th>Amount</th><th>%</th></tr></thead><tbody>${rows}</tbody></table></div>
+</div>`;
+}
+
+function renderDaily(month,yr,mo,mExp){
+  const el=document.getElementById('p-daily');
+  const dTotal=daysInMonth(yr,mo);
+  const W=680,H=180,pL=55,pR=20,pT=16,pB=36;
+  const cW=W-pL-pR,cH=H-pT-pB;
+  const byDay={};
+  mExp.forEach(r=>{const d=parseInt(r.date.split('-')[2]);byDay[d]=(byDay[d]||0)+r.amount});
+  let cum=0;
+  const pts=[];
+  for(let d=1;d<=dTotal;d++){cum+=(byDay[d]||0);pts.push({d,cum})}
+  const maxY=Math.max(...pts.map(p=>p.cum),1);
+  const xS=d=>pL+(d-1)/(dTotal-1||1)*cW;
+  const yS=v=>pT+cH-(v/maxY)*cH;
+  const linePts=pts.map(p=>`${xS(p.d)},${yS(p.cum)}`).join(' ');
+  let yLabels='';
+  [0,Math.round(maxY/2),maxY].forEach(v=>{
+    yLabels+=`<text x="${pL-4}" y="${yS(v)+4}" fill="#636e72" font-size="9" text-anchor="end" font-family="monospace">${fmt(v)}</text>
+    <line x1="${pL}" y1="${yS(v)}" x2="${W-pR}" y2="${yS(v)}" stroke="#21262d" stroke-width="0.5"/>`;
+  });
+  let xLabels='';
+  [1,5,10,15,20,25,dTotal].forEach(d=>{
+    if(d>dTotal)return;
+    xLabels+=`<text x="${xS(d)}" y="${H-8}" fill="#636e72" font-size="9" text-anchor="middle" font-family="monospace">${d}</text>`;
+  });
+  el.innerHTML=`<h2>📉 Daily Burn</h2>
+<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">
+  ${yLabels}${xLabels}
+  <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${H-pB}" stroke="#30363d"/>
+  <line x1="${pL}" y1="${H-pB}" x2="${W-pR}" y2="${H-pB}" stroke="#30363d"/>
+  <polyline points="${linePts}" fill="none" stroke="#00ff88" stroke-width="2"/>
+</svg>`;
+}
+
+function renderMoM(selectedMonth){
+  const el=document.getElementById('p-mom');
+  const allMonths=[...new Set(ALL_ROWS.map(r=>r.date.slice(0,7)))].sort();
+  if(!allMonths.includes(selectedMonth))allMonths.push(selectedMonth);
+  const last6=allMonths.slice(-6);
+  const totals=last6.map(m=>({m,v:sum(expenses(rowsForMonth(m)))}));
+  const W=680,H=180,pL=55,pR=20,pT=16,pB=36;
+  const cW=W-pL-pR,cH=H-pT-pB;
+  const maxV=Math.max(...totals.map(t=>t.v),1);
+  const bW=Math.floor(cW/last6.length*0.55);
+  const gap=cW/last6.length;
+  let bars='';
+  totals.forEach((t,i)=>{
+    const bh=Math.round((t.v/maxV)*cH);
+    const x=pL+i*gap+(gap-bW)/2;
+    const y=pT+cH-bh;
+    const isCurr=t.m===selectedMonth;
+    bars+=`<rect x="${x}" y="${y}" width="${bW}" height="${bh}" fill="${isCurr?'#00ff88':'#1a6e3f'}" rx="2"/>
+    <text x="${x+bW/2}" y="${H-pB+14}" fill="#8b949e" font-size="9" text-anchor="middle" font-family="monospace">${t.m.slice(5)}</text>
+    <text x="${x+bW/2}" y="${y-4}" fill="${isCurr?'#00ff88':'#636e72'}" font-size="9" text-anchor="middle" font-family="monospace">${fmt(t.v)}</text>`;
+  });
+  el.innerHTML=`<h2>📊 Month over Month</h2>
+<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <line x1="${pL}" y1="${pT}" x2="${pL}" y2="${H-pB}" stroke="#30363d"/>
+  <line x1="${pL}" y1="${H-pB}" x2="${W-pR}" y2="${H-pB}" stroke="#30363d"/>
+  ${bars}
+</svg>`;
+}
+
+function renderRecent(mRows){
+  const el=document.getElementById('p-recent');
+  const last15=[...mRows].sort((a,b)=>b.id-a.id).slice(0,15);
+  let rows='';
+  last15.forEach(r=>{
+    const cls=r.type==='income'?'green':'';
+    rows+=`<tr>
+      <td class="grey">${r.date}</td>
+      <td><span style="color:${catColor(r.category)};font-size:0.75rem">■</span> ${r.category}</td>
+      <td class="grey" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.note||''}</td>
+      <td class="${cls}" style="text-align:right">${r.type==='income'?'+':''}${fmt(r.amount)}</td>
+    </tr>`;
+  });
+  el.innerHTML=`<h2>🕒 Recent Activity</h2>
+<table>
+  <thead><tr><th>Date</th><th>Category</th><th>Note</th><th style="text-align:right">Amount</th></tr></thead>
+  <tbody>${rows||'<tr><td colspan="4" class="grey">No entries</td></tr>'}</tbody>
+</table>`;
+}
+
+function renderInsights(month,mRows,mExp,totalExp,cats){
+  const el=document.getElementById('p-insights');
+  const [yr,mo]=month.split('-').map(Number);
+  const today=new Date();
+  const isCurr=(yr===today.getFullYear()&&mo===(today.getMonth()+1));
+  const dTotal=daysInMonth(yr,mo);
+  const dElapsed=isCurr?today.getDate():dTotal;
+  const catsObj={};
+  cats.forEach(([c,v])=>catsObj[c]=v);
+
+  const bigCat=cats[0];
+  const i1=bigCat
+    ?`Biggest: <span style="color:#ffa500">${bigCat[0]}</span> at <span class="green">${fmt(bigCat[1])}</span>. Cutting 20% saves <span class="green">${fmt(Math.round(bigCat[1]*0.2*12))}/year</span>.`
+    :'No data yet.';
+
+  const disc=(catsObj.food||0)+(catsObj.luxuries||0)+(catsObj.clothes||0);
+  const discPct=totalExp>0?Math.round(disc/totalExp*100):0;
+  const i2=`Discretionary (food+luxuries+clothes): <span class="${discPct>50?'red':'green'}">${fmt(disc)} — ${discPct}%</span>`;
+
+  const foodCount=mExp.filter(r=>r.category==='food').length;
+  const i3=`Food orders this month: <span style="color:#ffa500">${foodCount} entries</span> = ${fmt(catsObj.food||0)}`;
+
+  const pace=dElapsed>0?(totalExp/dElapsed)*dTotal:0;
+  const i4=`On pace to spend <span style="color:#ffa500">${fmt(pace)}</span> by month end.`;
+
+  const [prevYr,prevMo]=[mo===1?yr-1:yr,mo===1?12:mo-1];
+  const prevMonth=`${prevYr}-${String(prevMo).padStart(2,'0')}`;
+  const prevExp=sum(expenses(rowsForMonth(prevMonth)));
+  let i5='No previous month data.';
+  if(prevExp>0){
+    const chg=Math.round((totalExp-prevExp)/prevExp*100);
+    i5=chg>=0
+      ?`<span class="red">${chg}% more</span> than last month (${fmt(prevExp)})`
+      :`<span class="green">${Math.abs(chg)}% less</span> than last month (${fmt(prevExp)})`;
+  }
+
+  el.innerHTML=`<h2>💡 Insights</h2>
+<div style="display:flex;flex-direction:column;gap:12px">
+  <div><span style="color:#8b949e;font-size:0.75rem">BIGGEST CATEGORY</span><br>${i1}</div>
+  <div><span style="color:#8b949e;font-size:0.75rem">DISCRETIONARY LOAD</span><br>${i2}</div>
+  <div><span style="color:#8b949e;font-size:0.75rem">FOOD TRACKING</span><br>${i3}</div>
+  <div><span style="color:#8b949e;font-size:0.75rem">PACE</span><br>${i4}</div>
+  <div><span style="color:#8b949e;font-size:0.75rem">MONTH OVER MONTH</span><br>${i5}</div>
+</div>`;
+}
+
+loadData();
+</script>
+</body>
+</html>
